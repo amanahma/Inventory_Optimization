@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 *.pkl
+.streamlit/secrets.toml
+pycache/
+
