@@ -1,28 +1,42 @@
-# M5 Dark-Store Replenishment Optimizer — project dependencies
-# Data scope: Walmart M5 dataset, CA_1 store only (3,049 item-store combinations)
-# (stdlib modules os, json, sqlite3, glob, pickle, etc. are not listed)
+# # M5 Dark-Store Replenishment Optimizer — project dependencies
+# # Data scope: Walmart M5 dataset, CA_1 store only (3,049 item-store combinations)
+# # (stdlib modules os, json, sqlite3, glob, pickle, etc. are not listed)
 
-# Data processing
-numpy==2.4.1
-pandas==3.0.1
-pyarrow==24.0.0
+# # Data processing
+# numpy==2.4.1
+# pandas==3.0.1
+# pyarrow==24.0.0
 
-# Forecasting
-lightgbm==4.6.0
-statsmodels==0.14.6
-scikit-learn==1.8.0
+# # Forecasting
+# lightgbm==4.6.0
+# statsmodels==0.14.6
+# scikit-learn==1.8.0
 
-# Inventory optimization
-scipy==1.17.1
-PuLP==3.3.2
+# # Inventory optimization
+# scipy==1.17.1
+# PuLP==3.3.2
 
-# Charts
-matplotlib==3.10.8
-seaborn==0.13.2
+# # Charts
+# matplotlib==3.10.8
+# seaborn==0.13.2
 
-# Interactive dashboard (app.py)
-# NOTE: streamlit is pinned to a Tornado-based release (1.50.x). Streamlit 1.58+
-# switched to a Starlette server that conflicts with the starlette<0.42 pin
-# required by other tooling in this environment.
-streamlit==1.50.0
-plotly==6.6.0
+# # Interactive dashboard (app.py)
+# # NOTE: streamlit is pinned to a Tornado-based release (1.50.x). Streamlit 1.58+
+# # switched to a Starlette server that conflicts with the starlette<0.42 pin
+# # required by other tooling in this environment.
+# streamlit==1.50.0
+# plotly==6.6.0
+
+streamlit
+pandas>=1.4.0,<3
+plotly
+numpy
+scipy
+scikit-learn
+lightgbm
+statsmodels
+pulp
+pyarrow
+openpyxl
+matplotlib
+seaborn
