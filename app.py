@@ -35,6 +35,14 @@ def opath(name):
     return os.path.join(OUT, name)
 
 
+# One canonical ABC color map used by EVERY chart that colors by abc_class,
+# so "A" is the same color on every tab. (Fix 9)
+ABC_COLORS = {"A": "#EF4444", "B": "#F59E0B", "C": "#22C55E"}
+
+# One canonical category color map used by every chart that colors by cat_id.
+CAT_COLORS = {"FOODS": "#3B82F6", "HOBBIES": "#22C55E", "HOUSEHOLD": "#F59E0B"}
+
+
 # ---------------------------------------------------------------- data loading
 @st.cache_data
 def load_data():
@@ -52,10 +60,40 @@ def load_data():
 main_df, inv_df, nv_df, pulp_df, date_df, model_df, stats = load_data()
 
 
+def cost_reductions(df):
+    """Return (eoq_only_pct, total_policy_pct) computed live from a frame.
+
+    EOQ-only reduction  = ordering + holding only:
+        (naive_eoq - optimized_eoq) / naive_eoq
+    Total-policy reduction = includes avoided stockout cost. annual_saving is
+    already measured against the stockout-inclusive naive baseline, so the
+    original total cost is (saving + remaining optimized cost):
+        saving / (saving + optimized_eoq)
+    """
+    naive_eoq = df["total_annual_cost_naive"].sum()
+    opt_eoq = df["total_annual_cost_EOQ"].sum()
+    saving = df["annual_saving"].sum()
+    eoq_only = (naive_eoq - opt_eoq) / naive_eoq * 100 if naive_eoq else 0
+    total_policy = saving / (saving + opt_eoq) * 100 if (saving + opt_eoq) else 0
+    return eoq_only, total_policy
+
+
+# Print reconciled numbers once to the terminal for verification (full data).
+_eoq_only_all, _total_all = cost_reductions(main_df)
+print(f"[cost-reconciliation] EOQ-only reduction (ordering+holding) = {_eoq_only_all:.1f}%")
+print(f"[cost-reconciliation] Total policy reduction (incl. stockout) = {_total_all:.1f}%")
+
+
 # ------------------------------------------------------------------- sidebar
 with st.sidebar:
-    st.image(opath("readme_chart_2_abc_xyz_heatmap.png"),
-             caption="ABC-XYZ Segmentation", use_container_width=True)
+    # Clean text header instead of a shrunk, illegible heatmap thumbnail.
+    # The full-size heatmap still appears inside the ABC-XYZ tab. (Fix 8)
+    st.markdown(
+        "### 📦 M5 Inventory Optimizer\n"
+        "Forecasting + OR Optimization\n\n"
+        "Walmart M5 | CA_1 Store"
+    )
+    st.markdown("---")
 
     st.markdown("## Filters")
 
@@ -155,12 +193,13 @@ with tab1:
         )
 
     with col3:
-        naive_cost = filtered_df["total_annual_cost_naive"].sum()
-        opt_cost = filtered_df["total_annual_cost_EOQ"].sum()
-        reduction = ((naive_cost - opt_cost) / naive_cost * 100) if naive_cost > 0 else 0
+        eoq_only_pct, total_policy_pct = cost_reductions(filtered_df)
         st.metric(
-            label="Cost Reduction vs Naive",
-            value=f"{reduction:.1f}%"
+            label="Total Cost Reduction (incl. stockout)",
+            value=f"{total_policy_pct:.1f}%"
+        )
+        st.caption(
+            f"EOQ-only reduction (ordering + holding): {eoq_only_pct:.1f}%"
         )
 
     with col4:
@@ -205,7 +244,7 @@ with tab1:
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
             height=350
         )
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1)
 
     with col_right:
         ss_by_abc = filtered_df.groupby("abc_class").agg(
@@ -218,7 +257,7 @@ with tab1:
             name="Avg Safety Stock",
             x=ss_by_abc["abc_class"],
             y=ss_by_abc["Avg_Safety_Stock"],
-            marker_color="#3B82F6"
+            marker_color=[ABC_COLORS.get(c, "#3B82F6") for c in ss_by_abc["abc_class"]]
         ))
         fig2.update_layout(
             title="Average Safety Stock by ABC Class",
@@ -226,12 +265,14 @@ with tab1:
             yaxis_title="Units",
             height=350
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2)
 
     # Row 3: Summary insight box
     st.info(
-        f"**Key Insight:** EOQ-based optimization reduces annual inventory cost by "
-        f"**{reduction:.1f}%** compared to a naive fixed-order policy. "
+        f"**Key Insight:** The full inventory policy reduces total annual cost by "
+        f"**{total_policy_pct:.1f}%** (including avoided stockout cost; EOQ-only "
+        f"ordering + holding reduction is {eoq_only_pct:.1f}%) compared to a naive "
+        f"fixed-order policy. "
         f"This saving is driven by matching order quantities to actual demand "
         f"and sizing safety stock using forecast error (not raw demand variability). "
         f"**{at_risk}** items are currently below their reorder point and face stockout risk."
@@ -251,7 +292,7 @@ with tab2:
     st.image(
         opath("readme_chart_1_model_comparison.png"),
         caption="RMSE comparison across models and categories",
-        use_container_width=True
+        width="stretch"
     )
 
     st.markdown("---")
@@ -278,14 +319,26 @@ with tab2:
                     color_discrete_sequence=px.colors.qualitative.Set2
                 )
                 fig3.update_layout(height=400)
-                st.plotly_chart(fig3, use_container_width=True)
+                st.plotly_chart(fig3)
 
         with col_right:
             st.subheader("Detailed Metrics Table")
+            # MAPE is undefined for intermittent (Croston) series — show a clear
+            # label instead of a raw None/NaN, which reads like a bug. (Fix 3)
+            model_display = model_df.copy()
+            if "MAPE" in model_display.columns:
+                model_display["MAPE"] = model_display["MAPE"].apply(
+                    lambda v: "N/A (intermittent)" if pd.isna(v) else f"{v:.2f}"
+                )
             st.dataframe(
-                model_df,
-                use_container_width=True,
+                model_display,
+                width="stretch",
                 height=400
+            )
+            st.caption(
+                "MAPE is undefined for intermittent (Z-class) series because "
+                "demand is frequently zero — RMSE and MAE are used instead. "
+                "This is standard practice for intermittent demand."
             )
 
     # Key callout boxes
@@ -344,7 +397,7 @@ with tab3:
             yaxis_title="Revenue Class (ABC)",
             height=400
         )
-        st.plotly_chart(fig4, use_container_width=True)
+        st.plotly_chart(fig4)
 
     with col_right:
         # Bar chart of items per segment
@@ -361,7 +414,7 @@ with tab3:
             color_continuous_scale="Blues"
         )
         fig5.update_layout(height=400, showlegend=False)
-        st.plotly_chart(fig5, use_container_width=True)
+        st.plotly_chart(fig5)
 
     st.markdown("---")
 
@@ -390,7 +443,7 @@ with tab3:
             "Simple ROP"
         ]
     }
-    st.dataframe(pd.DataFrame(mapping_data), use_container_width=True)
+    st.dataframe(pd.DataFrame(mapping_data), width="stretch")
 
 
 # =====================================================================  TAB 4
@@ -433,33 +486,32 @@ with tab4:
             color="abc_class",
             barmode="group",
             title="Average Safety Stock by Category and ABC Class",
-            color_discrete_map={"A": "#EF4444", "B": "#F59E0B", "C": "#22C55E"},
+            color_discrete_map=ABC_COLORS,
             labels={"Avg_SS": "Avg Safety Stock (units)", "cat_id": "Category"}
         )
         fig6.update_layout(height=350)
-        st.plotly_chart(fig6, use_container_width=True)
+        st.plotly_chart(fig6)
 
     with col_right:
-        # DOH by category
-        doh_cat = filtered_df.groupby("cat_id").agg(
-            Avg_DOH=("DOH", "mean"),
+        # Turnover by category and ABC class. (Fix 6 — replaces the flat DOH
+        # chart, which read ~14 days everywhere because naive stock = mean x 14.)
+        turn_cat = filtered_df.groupby(["cat_id", "abc_class"]).agg(
             Avg_Turnover=("turnover", "mean")
         ).reset_index()
 
-        fig7 = go.Figure()
-        fig7.add_trace(go.Bar(
-            name="Days of Inventory (DOH)",
-            x=doh_cat["cat_id"],
-            y=doh_cat["Avg_DOH"],
-            marker_color="#3B82F6"
-        ))
-        fig7.update_layout(
-            title="Average Days of Inventory on Hand by Category",
-            xaxis_title="Category",
-            yaxis_title="Days",
-            height=350
+        fig7 = px.bar(
+            turn_cat,
+            x="cat_id",
+            y="Avg_Turnover",
+            color="abc_class",
+            barmode="group",
+            title="Average Inventory Turnover by Category and ABC Class",
+            color_discrete_map=ABC_COLORS,
+            labels={"Avg_Turnover": "Avg Turnover (x/yr)", "cat_id": "Category",
+                    "abc_class": "ABC Class"}
         )
-        st.plotly_chart(fig7, use_container_width=True)
+        fig7.update_layout(height=350)
+        st.plotly_chart(fig7)
 
     st.markdown("---")
 
@@ -478,7 +530,7 @@ with tab4:
 
     st.dataframe(
         filtered_df[display_cols].round(2),
-        use_container_width=True,
+        width="stretch",
         height=400
     )
 
@@ -530,22 +582,33 @@ with tab5:
         ).reset_index()
         risk_abc["Risk_Pct"] = risk_abc["At_Risk"] / risk_abc["Total"] * 100
 
-        color_map = {"A": "#EF4444", "B": "#F59E0B", "C": "#22C55E"}
+        # Keep A, B, C ordering (top to bottom) for consistency with other tabs.
+        order = [c for c in ["A", "B", "C"] if c in set(risk_abc["abc_class"])]
+        risk_abc = risk_abc.set_index("abc_class").loc[order].reset_index()
+
+        # NOTE: This chart is the ONE intentional exception to ABC_COLORS — it is
+        # colored by RISK MAGNITUDE, not ABC letter, so the highest-risk bar is
+        # the reddest (green=highest-risk would read as "safe"). (Fix 2 / Fix 9)
+        risk_rank = risk_abc["Risk_Pct"].rank(method="first", ascending=False)
+        risk_palette = {1.0: "#EF4444", 2.0: "#F59E0B", 3.0: "#22C55E"}
+        bar_colors = [risk_palette.get(r, "#F59E0B") for r in risk_rank]
+
         fig8 = go.Figure(go.Bar(
             x=risk_abc["Risk_Pct"],
             y=risk_abc["abc_class"],
             orientation="h",
-            marker_color=[color_map.get(c, "gray") for c in risk_abc["abc_class"]],
+            marker_color=bar_colors,
             text=[f"{v:.1f}%" for v in risk_abc["Risk_Pct"]],
             textposition="outside"
         ))
         fig8.update_layout(
-            title="Stockout Risk % by ABC Class",
+            title="Stockout Risk % by ABC Class (redder = higher risk)",
             xaxis_title="% Items at Risk",
             yaxis_title="ABC Class",
+            yaxis=dict(autorange="reversed"),  # A at top, C at bottom
             height=300
         )
-        st.plotly_chart(fig8, use_container_width=True)
+        st.plotly_chart(fig8)
 
     with col_right:
         # Risk by category
@@ -555,15 +618,23 @@ with tab5:
         ).reset_index()
         risk_cat["Risk_Pct"] = risk_cat["At_Risk"] / risk_cat["Total"] * 100
 
-        fig9 = px.pie(
-            risk_cat,
-            values="At_Risk",
-            names="cat_id",
+        # Horizontal bar (sorted, labeled) instead of a weak 3-slice pie. (Fix 7)
+        risk_cat = risk_cat.sort_values("At_Risk", ascending=True)
+        fig9 = go.Figure(go.Bar(
+            x=risk_cat["At_Risk"],
+            y=risk_cat["cat_id"],
+            orientation="h",
+            marker_color=[CAT_COLORS.get(c, "#3B82F6") for c in risk_cat["cat_id"]],
+            text=[f"{int(v):,}" for v in risk_cat["At_Risk"]],
+            textposition="outside"
+        ))
+        fig9.update_layout(
             title="Items at Stockout Risk by Category",
-            color_discrete_sequence=["#EF4444", "#F59E0B", "#3B82F6"]
+            xaxis_title="At-Risk Items (count)",
+            yaxis_title="Category",
+            height=300
         )
-        fig9.update_layout(height=300)
-        st.plotly_chart(fig9, use_container_width=True)
+        st.plotly_chart(fig9)
 
     st.markdown("---")
 
@@ -585,7 +656,7 @@ with tab5:
             a_risk_df[priority_cols].sort_values(
                 "DOH" if "DOH" in a_risk_df.columns else priority_cols[0]
             ).round(2),
-            use_container_width=True,
+            width="stretch",
             height=350
         )
     else:
@@ -600,86 +671,106 @@ with tab6:
         "Cost components: ordering cost, holding cost, stockout cost."
     )
 
+    # ---- The core insight, promoted to the top of the tab, full width (Fix 4)
+    # Scatter: forecast error vs safety stock. forecast_error_std lives in
+    # inv_df, so join it onto the filtered frame.
+    scatter_src = filtered_df
+    if "forecast_error_std" not in scatter_src.columns and "forecast_error_std" in inv_df.columns:
+        scatter_src = filtered_df.merge(
+            inv_df[["item_id", "store_id", "forecast_error_std"]],
+            on=["item_id", "store_id"], how="left"
+        )
+
+    if "forecast_error_std" in scatter_src.columns:
+        ins = scatter_src.dropna(subset=["forecast_error_std", "safety_stock"])
+        fig11 = px.scatter(
+            ins,
+            x="forecast_error_std",
+            y="safety_stock",
+            color="abc_class",
+            size="sell_price" if "sell_price" in ins.columns else None,
+            trendline="ols",
+            title="The Core Insight: Better Forecasts → Less Safety Stock → Lower Cost",
+            color_discrete_map=ABC_COLORS,
+            labels={
+                "forecast_error_std": "Forecast Error Std (units)",
+                "safety_stock": "Safety Stock (units)",
+                "abc_class": "ABC Class"
+            },
+            opacity=0.6
+        )
+        fig11.update_layout(height=420)
+        st.plotly_chart(fig11)
+
+        # Real slope of the relationship via least squares.
+        if len(ins) >= 2 and ins["forecast_error_std"].nunique() > 1:
+            slope = np.polyfit(ins["forecast_error_std"], ins["safety_stock"], 1)[0]
+            st.success(
+                f"Each unit of forecast error requires roughly **{slope:.2f} units** "
+                f"of additional safety stock. Because safety stock is sized on "
+                f"forecast ERROR (not raw demand variability), a more accurate model "
+                f"directly reduces inventory holding cost at the same service level. "
+                f"This is why the ML layer and the OR layer are connected — not separate."
+            )
+    else:
+        st.image(
+            opath("readme_chart_5_service_level_tradeoff.png"),
+            caption="Service Level vs Safety Stock Cost",
+            width="stretch"
+        )
+
+    st.markdown("---")
+
     # Show pre-generated chart
     if os.path.exists(opath("readme_chart_3_policy_comparison.png")):
         st.image(
             opath("readme_chart_3_policy_comparison.png"),
             caption="Policy cost comparison by category",
-            use_container_width=True
+            width="stretch"
         )
 
     st.markdown("---")
 
-    col_left, col_right = st.columns(2)
+    # Saving by category
+    saving_cat = filtered_df.groupby("cat_id").agg(
+        Total_Saving=("annual_saving", "sum")
+    ).reset_index()
 
-    with col_left:
-        # Saving by category
-        saving_cat = filtered_df.groupby("cat_id").agg(
-            Total_Saving=("annual_saving", "sum")
-        ).reset_index()
-
-        fig10 = px.bar(
-            saving_cat,
-            x="cat_id",
-            y="Total_Saving",
-            title="Total Annual Saving by Category",
-            color="cat_id",
-            color_discrete_sequence=["#22C55E", "#3B82F6", "#F59E0B"],
-            labels={"Total_Saving": "Annual Saving ($)", "cat_id": "Category"}
-        )
-        fig10.update_layout(showlegend=False, height=350)
-        st.plotly_chart(fig10, use_container_width=True)
-
-    with col_right:
-        # Scatter: forecast error vs safety stock (joined from inv_df)
-        scatter_src = filtered_df
-        if "forecast_error_std" not in scatter_src.columns and "forecast_error_std" in inv_df.columns:
-            scatter_src = filtered_df.merge(
-                inv_df[["item_id", "store_id", "forecast_error_std"]],
-                on=["item_id", "store_id"], how="left"
-            )
-
-        if "forecast_error_std" in scatter_src.columns:
-            sample = scatter_src.sample(min(500, len(scatter_src)))
-            fig11 = px.scatter(
-                sample,
-                x="forecast_error_std",
-                y="safety_stock",
-                color="abc_class",
-                size="sell_price" if "sell_price" in sample.columns else None,
-                title="Forecast Error vs Safety Stock Requirement",
-                color_discrete_map={
-                    "A": "#EF4444", "B": "#F59E0B", "C": "#22C55E"
-                },
-                labels={
-                    "forecast_error_std": "Forecast Error Std",
-                    "safety_stock": "Safety Stock (units)"
-                },
-                opacity=0.6
-            )
-            fig11.update_layout(height=350)
-            st.plotly_chart(fig11, use_container_width=True)
-        else:
-            st.image(
-                opath("readme_chart_5_service_level_tradeoff.png"),
-                caption="Service Level vs Safety Stock Cost",
-                use_container_width=True
-            )
+    fig10 = px.bar(
+        saving_cat,
+        x="cat_id",
+        y="Total_Saving",
+        title="Total Annual Saving by Category",
+        color="cat_id",
+        color_discrete_map=CAT_COLORS,
+        labels={"Total_Saving": "Annual Saving ($)", "cat_id": "Category"}
+    )
+    fig10.update_layout(showlegend=False, height=350)
+    st.plotly_chart(fig10)
 
     st.markdown("---")
 
     # Summary table
     st.subheader("Cost Summary by Category")
+    _eoq_only_t, _total_t = cost_reductions(filtered_df)
+    st.markdown(
+        f"**Note:** EOQ-only savings (ordering + holding) = **{_eoq_only_t:.1f}%**. "
+        f"Including avoided stockout cost, total policy savings = **{_total_t:.1f}%**. "
+        f"Category figures below are total-policy savings."
+    )
     cost_summary = filtered_df.groupby("cat_id").agg(
         Naive_Cost=("total_annual_cost_naive", "sum"),
         Optimized_Cost=("total_annual_cost_EOQ", "sum"),
         Total_Saving=("annual_saving", "sum"),
         Avg_Saving_Pct=("annual_saving_pct", "mean")
     ).round(2).reset_index()
+    # Total-policy saving %: saving / (saving + remaining optimized cost),
+    # consistent with the headline KPI (denominator includes stockout cost).
     cost_summary["Saving_%"] = (
-        cost_summary["Total_Saving"] / cost_summary["Naive_Cost"] * 100
+        cost_summary["Total_Saving"]
+        / (cost_summary["Total_Saving"] + cost_summary["Optimized_Cost"]) * 100
     ).round(1)
-    st.dataframe(cost_summary, use_container_width=True)
+    st.dataframe(cost_summary, width="stretch")
 
     st.info(
         "**Why does forecasting accuracy affect cost?** "
@@ -722,7 +813,7 @@ with tab7:
 
         # Display summary table
         st.subheader("Scenario Comparison")
-        st.dataframe(scenario_summary.round(2), use_container_width=True)
+        st.dataframe(scenario_summary.round(2), width="stretch")
 
         st.markdown("---")
 
@@ -750,7 +841,7 @@ with tab7:
                 barmode="group",
                 height=350
             )
-            st.plotly_chart(fig12, use_container_width=True)
+            st.plotly_chart(fig12)
 
         with col_right:
             # Fill rate line chart
@@ -771,7 +862,7 @@ with tab7:
                 yaxis=dict(range=[0, 110]),
                 height=350
             )
-            st.plotly_chart(fig13, use_container_width=True)
+            st.plotly_chart(fig13)
 
     st.markdown("---")
     st.subheader("LP Formulation")
