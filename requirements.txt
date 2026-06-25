@@ -1,0 +1,21 @@
+# M5 Dark-Store Replenishment Optimizer — project dependencies
+# Data scope: Walmart M5 dataset, CA_1 store only (3,049 item-store combinations)
+# (stdlib modules os, json, sqlite3, glob, pickle, etc. are not listed)
+
+# Data processing
+numpy==2.4.1
+pandas==3.0.1
+pyarrow==24.0.0
+
+# Forecasting
+lightgbm==4.6.0
+statsmodels==0.14.6
+scikit-learn==1.8.0
+
+# Inventory optimization
+scipy==1.17.1
+PuLP==3.3.2
+
+# Charts
+matplotlib==3.10.8
+seaborn==0.13.2

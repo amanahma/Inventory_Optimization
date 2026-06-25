@@ -1,0 +1,4 @@
+dept_id,avg_sales_snap,avg_sales_nonsnap,pct_uplift
+FOODS_1,1.4421,1.4262,1.12
+FOODS_2,1.0951,0.9104,20.29
+FOODS_3,2.3438,2.1336,9.85
