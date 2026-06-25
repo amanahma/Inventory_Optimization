@@ -19,3 +19,10 @@ PuLP==3.3.2
 # Charts
 matplotlib==3.10.8
 seaborn==0.13.2
+
+# Interactive dashboard (app.py)
+# NOTE: streamlit is pinned to a Tornado-based release (1.50.x). Streamlit 1.58+
+# switched to a Starlette server that conflicts with the starlette<0.42 pin
+# required by other tooling in this environment.
+streamlit==1.50.0
+plotly==6.6.0
